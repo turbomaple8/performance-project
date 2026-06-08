@@ -150,26 +150,54 @@ def load_country(country: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+# Non-occupied rooms whose availability label means "committed, revenue pending"
+# (vs truly empty). Matches the original perf sheet's "Vacant room loss (booked)"
+# vs "(vacant)" split. "PIpeline" is the sheet's typo for Pipeline.
+BOOKED_LABELS = {"booked", "pre-booked", "prebooked", "pipeline"}
+
+
 def metrics(df: pd.DataFrame) -> dict:
-    """Compute headline KPIs for any room-level DataFrame (building/city/country)."""
+    """Compute headline KPIs for any room-level DataFrame (building/city/country).
+
+    Loss decomposition mirrors the original performance sheet:
+        market_rent = collected + price_loss + vacancy_loss
+        vacancy_loss = booked_loss + vacant_loss
+      - price_loss  : occupied rooms rented below market (market - amount).
+      - booked_loss : non-occupied rooms that are booked / pre-booked / pipeline.
+      - vacant_loss : non-occupied rooms that are truly vacant.
+    """
     if df is None or df.empty:
         return {
-            "rooms": 0, "occupied": 0, "vacant": 0,
-            "market_rent": 0.0, "collected": 0.0, "vacancy_loss": 0.0,
+            "rooms": 0, "occupied": 0, "vacant": 0, "booked": 0,
+            "market_rent": 0.0, "collected": 0.0, "occupied_market": 0.0,
+            "price_loss": 0.0, "vacancy_loss": 0.0,
+            "vacant_loss": 0.0, "booked_loss": 0.0,
             "occupancy": 0.0, "capture": 0.0,
         }
     occ = df[df["occupied"]]
-    vac = df[~df["occupied"]]
+    non = df[~df["occupied"]]
+    booked_mask = non["availability"].str.strip().str.lower().isin(BOOKED_LABELS)
+    booked = non[booked_mask]
+    vacant = non[~booked_mask]
+
     rooms = len(df)
     market = float(df["market_rent_monthly"].sum())
     collected = float(occ["amount_monthly"].sum())
+    occupied_market = float(occ["market_rent_monthly"].sum())
+    booked_loss = float(booked["market_rent_monthly"].sum())
+    vacant_loss = float(vacant["market_rent_monthly"].sum())
     return {
         "rooms": rooms,
         "occupied": int(len(occ)),
-        "vacant": int(len(vac)),
+        "vacant": int(len(vacant)),
+        "booked": int(len(booked)),
         "market_rent": market,
         "collected": collected,
-        "vacancy_loss": float(vac["market_rent_monthly"].sum()),
+        "occupied_market": occupied_market,
+        "price_loss": occupied_market - collected,
+        "vacancy_loss": booked_loss + vacant_loss,
+        "vacant_loss": vacant_loss,
+        "booked_loss": booked_loss,
         "occupancy": len(occ) / rooms if rooms else 0.0,
         "capture": collected / market if market else 0.0,
     }

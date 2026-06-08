@@ -146,8 +146,10 @@ kpis = [
     ("accent", "Total Market Rent", money(sym, m["market_rent"]), "monthly potential"),
     ("teal", "Collected Rent", money(sym, m["collected"]), "monthly actual"),
     ("accent", "Occupancy", occ_pct, f"{m['occupied']} / {m['rooms']} rooms"),
-    ("amber", "Vacancy Loss", money(sym, m["vacancy_loss"]), f"{m['vacant']} vacant rooms"),
-    ("rose", "Revenue Capture", cap_pct, "collected / market"),
+    ("rose", "Price Optimization Loss", money(sym, m["price_loss"]), "occupied below market"),
+    ("amber", "Vacancy Loss", money(sym, m["vacancy_loss"]),
+     f"{m['vacant']} vacant · {m['booked']} booked"),
+    ("teal", "Revenue Capture", cap_pct, "collected / market"),
 ]
 cards = "".join(
     f'<div class="kpi {c}"><div class="bar"></div>'
@@ -170,6 +172,35 @@ def donut_room_types(scope_df):
         text="Collected<br>by room type", showarrow=False,
         font=dict(size=12, color="#8b97b3"))])
     return style_fig(fig, 330)
+
+
+def revenue_bridge(mm, symbol):
+    """Horizontal stacked bar: Market Rent = Collected + the loss lines."""
+    segs = [
+        ("Collected", mm["collected"], "#2dd4bf"),
+        ("Price optimization loss", mm["price_loss"], "#fb7185"),
+        ("Vacancy — booked", mm["booked_loss"], "#a78bfa"),
+        ("Vacancy — vacant", mm["vacant_loss"], "#fbbf24"),
+    ]
+    fig = go.Figure()
+    for name, val, color in segs:
+        fig.add_bar(
+            y=["Market Rent"], x=[val], name=name, orientation="h",
+            marker_color=color,
+            hovertemplate=f"{name}: {symbol} %{{x:,.0f}}<extra></extra>")
+    fig.update_layout(barmode="stack")
+    fig.update_yaxes(showticklabels=False)
+    fig.update_xaxes(title=None, tickprefix=f"{symbol} ")
+    return style_fig(fig, 150)
+
+
+# ----------------------------------------------------------------- revenue bridge
+st.markdown(
+    '<div class="section-title">Revenue bridge '
+    '<span class="muted">· market rent = collected + price optimization loss + vacancy loss</span></div>',
+    unsafe_allow_html=True)
+st.plotly_chart(revenue_bridge(m, sym), width="stretch",
+                config={"displayModeBar": False})
 
 
 # ----------------------------------------------------------------- charts
@@ -230,7 +261,7 @@ if scope in ("country", "city"):
         f'<div class="section-title">Breakdown <span class="muted">· '
         f'every {group_col}</span></div>', unsafe_allow_html=True)
     tbl = g[[group_col, "rooms", "occupied", "vacant", "market_rent",
-             "collected", "vacancy_loss", "occupancy", "capture"]].copy()
+             "collected", "price_loss", "vacancy_loss", "occupancy", "capture"]].copy()
     st.dataframe(
         tbl, width="stretch", hide_index=True,
         column_config={
@@ -238,6 +269,7 @@ if scope in ("country", "city"):
             "rooms": "Rooms", "occupied": "Occ.", "vacant": "Vac.",
             "market_rent": st.column_config.NumberColumn("Market Rent", format=f"{sym} %.0f"),
             "collected": st.column_config.NumberColumn("Collected", format=f"{sym} %.0f"),
+            "price_loss": st.column_config.NumberColumn("Price Opt. Loss", format=f"{sym} %.0f"),
             "vacancy_loss": st.column_config.NumberColumn("Vacancy Loss", format=f"{sym} %.0f"),
             "occupancy": st.column_config.ProgressColumn("Occupancy", format="%.0f%%", min_value=0, max_value=1),
             "capture": st.column_config.ProgressColumn("Capture", format="%.0f%%", min_value=0, max_value=1.2),
