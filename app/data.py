@@ -1,17 +1,20 @@
 """Data loading and metric computation for the performance dashboard.
 
-Reads Lobby Board building tabs from Google Sheets and turns each room row into
-a normalized record. All weekly / four-weekly figures are converted to monthly.
+Reads Lobby Board building tabs from each city's Google Sheet and turns every
+room row into a normalized record. Columns are mapped BY HEADER NAME (row 3), not
+by fixed position, because some cities add columns (e.g. London has an extra
+"Building" column). All weekly / four-weekly figures are converted to monthly.
 
 Conventions (confirmed with the user):
-  - Market Rent (column D) is a WEEKLY price -> monthly = weekly * WEEKS_PER_MONTH.
-  - A room is OCCUPIED when its Amount (column E) is > 0; otherwise it is vacant.
-  - Amount on a "Four-Weekly" plan is a weekly figure -> monthly = amount * WEEKS_PER_MONTH.
-    Amount on a "Monthly" (or blank) plan is already monthly.
+  - Market Rent is a WEEKLY price -> monthly = weekly * WEEKS_PER_MONTH.
+  - A room is OCCUPIED when its Amount is > 0; otherwise it is vacant.
+  - Amount on a "Four-Weekly" plan is a weekly figure -> * WEEKS_PER_MONTH;
+    "Monthly" (or blank) amounts are already monthly.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import gspread
@@ -19,7 +22,7 @@ import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
-from config import WEEKS_PER_MONTH, buildings, cities, sheet_id
+from config import WEEKS_PER_MONTH, cities, display_name, sheet_id
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -27,21 +30,42 @@ SCOPES = [
 ]
 SA_PATH = Path(__file__).resolve().parent.parent / "config" / "service-account.json"
 
-# Column layout shared by every Lobby Board building tab (header lives on row 3).
-HEADER_ROW = 3
-COLS = [
-    "no", "apartment", "room_type", "market_rent_weekly", "amount_raw",
-    "plan", "source", "resident", "sex", "availability", "status",
+HEADER_ROW = 3  # Lobby Board header lives on row 3 in every sheet
+
+# Four-Weekly amount convention is inconsistent across cities: some teams enter a
+# WEEKLY rate (Boston), others enter the MONTHLY amount (Vancouver, Montreal).
+# Auto-detect per row: if the amount exceeds this multiple of the weekly market
+# rent, it was clearly entered as a monthly figure (×4.345 would blow past market),
+# so use it as-is; otherwise treat it as weekly and convert. Limitation: a genuine
+# deep-discount monthly rent below ~1.5× the weekly market rate is read as weekly.
+FOUR_WEEKLY_MONTHLY_RATIO = 1.5
+# A tab is a building lobbyboard if its header row contains these labels.
+LOBBY_TOKENS = {"MARKET RENT", "ROOM TYPE"}
+OLD_RE = re.compile(r"\bOLD\b", re.IGNORECASE)  # skip stale "- OLD" tabs
+
+# header label (lower-case) -> normalized field name
+HEADER_FIELDS = {
+    "no.": "no",
+    "apartment": "apartment",
+    "building": "building",
+    "room type": "room_type",
+    "market rent": "market_rent_weekly",
+    "amount": "amount_raw",
+    "plan": "plan",
+    "current resident name": "resident",
+    "room availability": "availability",
+}
+
+COLUMNS = [
+    "city", "building", "no", "apartment", "room_type",
+    "market_rent_weekly", "market_rent_monthly",
+    "amount_raw", "amount_monthly", "plan", "resident",
+    "availability", "occupied",
 ]
 
 
 def _credentials() -> Credentials:
-    """Load service-account credentials.
-
-    Prefers Streamlit secrets ([gcp_service_account] block) so the app works on
-    Streamlit Community Cloud without committing the key; falls back to the local
-    config/service-account.json for development.
-    """
+    """Prefer Streamlit secrets (cloud); fall back to the local key file (dev)."""
     try:
         sa = st.secrets.get("gcp_service_account")
     except Exception:
@@ -72,72 +96,123 @@ def _num(value) -> float | None:
         return None
 
 
-def _is_room_row(no_cell) -> bool:
-    return str(no_cell).strip().isdigit()
+def _q(tab: str) -> str:
+    """Quote a tab name for an A1 range."""
+    return "'" + tab.replace("'", "''") + "'"
+
+
+def _colmap(header: list) -> dict:
+    out: dict = {}
+    for i, cell in enumerate(header):
+        key = str(cell).strip().lower()
+        if key in HEADER_FIELDS:
+            out.setdefault(HEADER_FIELDS[key], i)
+    return out
+
+
+def _records(rows: list, header: list, tab: str, city: str) -> list[dict]:
+    cm = _colmap(header)
+    mr_i = cm.get("market_rent_weekly")
+    amt_i = cm.get("amount_raw")
+    plan_i = cm.get("plan")
+    avail_i = cm.get("availability")
+    type_i = cm.get("room_type")
+    apt_i = cm.get("apartment")
+    no_i = cm.get("no")
+    res_i = cm.get("resident")
+    bld_i = cm.get("building")
+    if mr_i is None or no_i is None:
+        return []
+
+    tab_label = display_name(tab)
+    recs: list[dict] = []
+    for row in rows:
+        def g(i):
+            return row[i] if (i is not None and i < len(row)) else ""
+
+        no = str(g(no_i)).strip()
+        if not no.isdigit():
+            continue
+
+        mr = _num(g(mr_i))
+        amt = _num(g(amt_i))
+        plan = str(g(plan_i)).strip()
+        is_four_weekly = plan.lower().startswith("four")
+
+        mr_monthly = mr * WEEKS_PER_MONTH if mr is not None else 0.0
+        occupied = amt is not None and amt > 0
+        if not occupied:
+            amount_monthly = 0.0
+        elif not is_four_weekly:
+            amount_monthly = amt  # monthly plan: already monthly
+        elif mr is None or amt > FOUR_WEEKLY_MONTHLY_RATIO * mr:
+            amount_monthly = amt  # four-weekly cell entered as a monthly amount
+        else:
+            amount_monthly = amt * WEEKS_PER_MONTH  # four-weekly cell is a weekly rate
+
+        # London-style tabs carry a per-row Building column; otherwise the tab is
+        # the building.
+        building = str(g(bld_i)).strip() if bld_i is not None else ""
+        if not building:
+            building = tab_label
+
+        recs.append({
+            "city": city,
+            "building": building,
+            "no": int(no),
+            "apartment": str(g(apt_i)).strip(),
+            "room_type": str(g(type_i)).strip() or "Unspecified",
+            "market_rent_weekly": mr,
+            "market_rent_monthly": mr_monthly,
+            "amount_raw": amt,
+            "amount_monthly": amount_monthly,
+            "plan": plan or "—",
+            "resident": str(g(res_i)).strip(),
+            "availability": str(g(avail_i)).strip(),
+            "occupied": occupied,
+        })
+    return recs
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def load_building(sheet_id_: str, tab: str, building_name: str, city: str) -> pd.DataFrame:
-    """Load one building tab into a normalized room-level DataFrame."""
-    ws = _client().open_by_key(sheet_id_).worksheet(tab)
-    values = ws.get(f"A{HEADER_ROW}:K{ws.row_count}")
-    data = values[1:] if values else []  # drop header row
-
-    records: list[dict] = []
-    for raw in data:
-        row = list(raw) + [""] * (len(COLS) - len(raw))
-        if not _is_room_row(row[0]):
+def building_tabs(sheet_id_: str) -> list[str]:
+    """Auto-detect the lobbyboard building tabs in a sheet (by header row)."""
+    sh = _client().open_by_key(sheet_id_)
+    titles = [ws.title for ws in sh.worksheets()]
+    ranges = [f"{_q(t)}!A{HEADER_ROW}:N{HEADER_ROW}" for t in titles]
+    res = sh.values_batch_get(ranges)["valueRanges"]
+    out: list[str] = []
+    for title, vr in zip(titles, res):
+        if OLD_RE.search(title):
             continue
-
-        mr_weekly = _num(row[3])
-        amount = _num(row[4])
-        plan = str(row[5]).strip()
-        is_four_weekly = plan.lower().startswith("four")
-
-        mr_monthly = mr_weekly * WEEKS_PER_MONTH if mr_weekly is not None else 0.0
-        occupied = amount is not None and amount > 0
-        if occupied:
-            amount_monthly = amount * WEEKS_PER_MONTH if is_four_weekly else amount
-        else:
-            amount_monthly = 0.0
-
-        records.append(
-            {
-                "city": city,
-                "building": building_name,
-                "no": int(str(row[0]).strip()),
-                "apartment": str(row[1]).strip(),
-                "room_type": str(row[2]).strip() or "Unspecified",
-                "market_rent_weekly": mr_weekly,
-                "market_rent_monthly": mr_monthly,
-                "amount_raw": amount,
-                "amount_monthly": amount_monthly,
-                "plan": plan or "—",
-                "resident": str(row[7]).strip(),
-                "availability": str(row[9]).strip(),
-                "occupied": occupied,
-            }
-        )
-
-    return pd.DataFrame(records, columns=[
-        "city", "building", "no", "apartment", "room_type",
-        "market_rent_weekly", "market_rent_monthly",
-        "amount_raw", "amount_monthly", "plan", "resident",
-        "availability", "occupied",
-    ])
+        values = vr.get("values") or [[]]
+        header = values[0] if values else []
+        labels = {str(c).strip().upper() for c in header}
+        if LOBBY_TOKENS <= labels:
+            out.append(title)
+    return out
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_city(country: str, city: str) -> pd.DataFrame:
-    """Concatenate every building in a city into one room-level DataFrame."""
+    """Load every building tab in a city into one room-level DataFrame."""
     sid = sheet_id(country, city)
-    frames = [
-        load_building(sid, b["tab"], b["name"], city)
-        for b in buildings(country, city)
-    ]
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    if not sid:
+        return pd.DataFrame(columns=COLUMNS)
+    tabs = building_tabs(sid)
+    if not tabs:
+        return pd.DataFrame(columns=COLUMNS)
+
+    sh = _client().open_by_key(sid)
+    ranges = [f"{_q(t)}!A{HEADER_ROW}:N2000" for t in tabs]
+    res = sh.values_batch_get(ranges)["valueRanges"]
+    recs: list[dict] = []
+    for tab, vr in zip(tabs, res):
+        values = vr.get("values") or []
+        if not values:
+            continue
+        recs.extend(_records(values[1:], values[0], tab, city))
+    return pd.DataFrame(recs, columns=COLUMNS)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -146,8 +221,15 @@ def load_country(country: str) -> pd.DataFrame:
     frames = [load_city(country, c) for c in cities(country)]
     frames = [f for f in frames if not f.empty]
     if not frames:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=COLUMNS)
     return pd.concat(frames, ignore_index=True)
+
+
+def active_buildings(df: pd.DataFrame) -> set:
+    """Buildings with at least one occupied room (i.e. not closed/empty)."""
+    if df is None or df.empty:
+        return set()
+    return set(df.loc[df["occupied"], "building"].unique())
 
 
 # Non-occupied rooms whose availability label means "committed, revenue pending"
@@ -157,14 +239,11 @@ BOOKED_LABELS = {"booked", "pre-booked", "prebooked", "pipeline"}
 
 
 def metrics(df: pd.DataFrame) -> dict:
-    """Compute headline KPIs for any room-level DataFrame (building/city/country).
+    """Headline KPIs for any room-level DataFrame (building/city/country).
 
     Loss decomposition mirrors the original performance sheet:
         market_rent = collected + price_loss + vacancy_loss
         vacancy_loss = booked_loss + vacant_loss
-      - price_loss  : occupied rooms rented below market (market - amount).
-      - booked_loss : non-occupied rooms that are booked / pre-booked / pipeline.
-      - vacant_loss : non-occupied rooms that are truly vacant.
     """
     if df is None or df.empty:
         return {

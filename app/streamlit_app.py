@@ -73,9 +73,17 @@ with st.sidebar:
     city_opts = ["All cities"] + cfg.cities(country)
     city_sel = st.selectbox("City", city_opts)
 
+    include_closed = st.checkbox(
+        "Include closed / empty buildings", value=False,
+        help="Buildings with zero occupied rooms are hidden by default so they "
+             "don't inflate vacancy loss.")
+
     building_sel = "All buildings"
     if city_sel != "All cities":
-        b_names = [b["name"] for b in cfg.buildings(country, city_sel)]
+        _cdf = data.load_city(country, city_sel)
+        if not include_closed and not _cdf.empty:
+            _cdf = _cdf[_cdf["building"].isin(data.active_buildings(_cdf))]
+        b_names = sorted(_cdf["building"].unique())
         building_sel = st.selectbox("Building", ["All buildings"] + b_names)
 
     st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
@@ -106,6 +114,10 @@ else:
     full = data.load_city(country, city_sel)
     df = full[full["building"] == building_sel].reset_index(drop=True)
 
+# Hide closed / empty buildings from aggregates unless explicitly included
+if not include_closed and scope in ("country", "city") and not df.empty:
+    df = df[df["building"].isin(data.active_buildings(df))].reset_index(drop=True)
+
 # Breadcrumb
 crumbs = [country]
 if city_sel != "All cities":
@@ -127,12 +139,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Empty state (US / UK or city with no buildings)
+# Empty state
 if df is None or df.empty:
+    msg = ("Every building here currently has zero occupied rooms. "
+           "Turn on <b>Include closed / empty buildings</b> in the sidebar to view them."
+           if not include_closed else
+           "No Lobby Board data is connected for this selection yet.")
     st.markdown(
-        '<div class="coming"><h2>No data wired up yet</h2>'
-        "<p>This region will light up once its Lobby Board sheets are connected. "
-        "Canada › Vancouver is live today.</p></div>",
+        f'<div class="coming"><h2>Nothing to show</h2><p>{msg}</p></div>',
         unsafe_allow_html=True,
     )
     st.stop()
@@ -280,7 +294,7 @@ if scope in ("country", "city"):
         })
 
 else:  # building scope
-    note = cfg.building_note(country, city_sel, here)
+    note = cfg.building_note(city_sel, here)
     if note:
         st.markdown(
             f'<div class="callout"><span class="ico">⚠</span>'

@@ -1,57 +1,66 @@
-"""Registry of countries -> cities -> buildings for the performance dashboard.
+"""Registry of countries -> cities -> Lobby Board sheet ids for the dashboard.
 
-Only Canada / Vancouver is wired up for now. US and UK are placeholders so the
-navigation shows the full hierarchy the project will grow into.
+City -> sheet links come from the "Sales - 2.0" tab (column B) of the Harrington
+Housing Business Report index sheet. Building tabs inside each sheet are
+auto-detected in data.py (no need to list them here).
+
+Not wired up yet (need action):
+  - Toronto  : index link is a Drive *folder*, not a single sheet.
+  - DC       : sheet not shared with the service account (PermissionError).
+  - Regina   : index link is a combined multi-city "SPV Lobbyboard" whose
+               building tabs also appear under other cities -> would double-count.
 """
 
 from __future__ import annotations
 
-VANCOUVER_SHEET_ID = "1qMcSju_Pa6yq_h1yazNXvj_l1WUO9I5qhaWBFNrpn_o"
-
-# Weeks per month used to convert weekly / four-weekly figures to monthly.
-# 4.34524 = 365.25 / 7 / 12. (52/12 = 4.33333 is an accepted alternative.)
+# Weeks per month for weekly/four-weekly -> monthly. 4.34524 = 365.25/7/12.
 WEEKS_PER_MONTH = 4.34524
+
+# Source index sheet (column B holds the per-city lobbyboard links).
+SALES_INDEX_SHEET = "12mvdf-KgHK38mfek4OCOLIdzLMQ2mtosEKO9je23ALo"
 
 REGISTRY: dict = {
     "Canada": {
         "flag": "🇨🇦",
         "currency": "CA$",
         "cities": {
-            "Vancouver": {
-                "sheet_id": VANCOUVER_SHEET_ID,
-                "buildings": [
-                    {"tab": "Int Plaza", "name": "International Plaza"},
-                    {
-                        "tab": "Richard & Pender",
-                        "name": "Richard & Pender",
-                        "note": (
-                            "Apartments 507, 701 and 901 (11 vacant rooms at the bottom of "
-                            "the sheet) appear to be under renovation. Manually-prepared "
-                            "figures exclude them, so the team's market rent came out lower "
-                            "(~CA$20,075). This dashboard counts all rooms, so its market rent "
-                            "and vacancy are higher. To revisit."
-                        ),
-                    },
-                    {"tab": "Hub Place", "name": "Hub Place"},
-                    {"tab": "Broughton", "name": "Broughton"},
-                    {"tab": "Hillcrest Manor", "name": "Hillcrest Manor"},
-                    {"tab": "Lynn Gary Apt", "name": "Lynn Gary Apt"},
-                    {"tab": "Pendrell", "name": "Pendrell"},
-                    {"tab": "Tantus Tower", "name": "Tantus Tower"},
-                ],
-            },
+            "Vancouver": "1qMcSju_Pa6yq_h1yazNXvj_l1WUO9I5qhaWBFNrpn_o",
+            "Calgary": "1_JY5hGmWedviemVWMF3rg8ifplUarEP34p7o8xPpPy4",
+            "Edmonton": "1-EKowAXNbTzC-iut3zehvXQfItM_ZRQxWp8KQe7Dt_E",
+            "Montreal": "18Trtl7TcTdPV9XLkeuYR4O9oAUGvJZE4vX6ZZ3daMo0",
+            "Ottawa": "1VwnmC_I44dNPDkmgzwWbDAQk7QBuflIWgO5e0l0VGao",
+            "Halifax": "1gBiBiL71bjx9ZU-dCjZ76PEKxqL73iVrOdlueA9b5sg",
+            "Victoria": "1ZFaPVYx-VotaQoz3O0BlAnrls6egsZPWnfEppKYTyIM",
         },
     },
     "United States": {
         "flag": "🇺🇸",
         "currency": "US$",
-        "cities": {},
+        "cities": {
+            "New York": "1cUTL-wNsVN5jnhJ_F5M0NY57rD1seDqfvRWvJ7x_xgc",
+            "Boston": "1jYgzWC5Stg5qj49METhJWeE-bqujcJ0_dBpT8z8r_vg",
+        },
     },
     "United Kingdom": {
         "flag": "🇬🇧",
         "currency": "£",
-        "cities": {},
+        "cities": {
+            "London": "1_sbrWBNC6ykg7IsHLVEovdB5sB5Snkv1xjSYwxupOsM",
+        },
     },
+}
+
+# Prettier display names for a few building tab titles.
+DISPLAY_OVERRIDES = {"Int Plaza": "International Plaza"}
+
+# Per-(city, building) notes rendered as a callout in the building view.
+CITY_BUILDING_NOTES = {
+    ("Vancouver", "Richard & Pender"): (
+        "Apartments 507, 701 and 901 (11 vacant rooms at the bottom of the sheet) "
+        "appear to be under renovation. Manually-prepared figures exclude them, so "
+        "the team's market rent came out lower (~CA$20,075). This dashboard counts "
+        "all rooms, so its market rent and vacancy are higher. To revisit."
+    ),
 }
 
 
@@ -63,15 +72,8 @@ def cities(country: str) -> list[str]:
     return list(REGISTRY.get(country, {}).get("cities", {}).keys())
 
 
-def buildings(country: str, city: str) -> list[dict]:
-    return REGISTRY.get(country, {}).get("cities", {}).get(city, {}).get("buildings", [])
-
-
-def building_note(country: str, city: str, name: str) -> str | None:
-    for b in buildings(country, city):
-        if b["name"] == name:
-            return b.get("note")
-    return None
+def sheet_id(country: str, city: str) -> str | None:
+    return REGISTRY.get(country, {}).get("cities", {}).get(city)
 
 
 def currency(country: str) -> str:
@@ -82,5 +84,9 @@ def flag(country: str) -> str:
     return REGISTRY.get(country, {}).get("flag", "")
 
 
-def sheet_id(country: str, city: str) -> str | None:
-    return REGISTRY.get(country, {}).get("cities", {}).get(city, {}).get("sheet_id")
+def display_name(tab: str) -> str:
+    return DISPLAY_OVERRIDES.get(tab, tab)
+
+
+def building_note(city: str, name: str) -> str | None:
+    return CITY_BUILDING_NOTES.get((city, name))
