@@ -175,23 +175,27 @@ def donut_room_types(scope_df):
 
 
 def revenue_bridge(mm, symbol):
-    """Horizontal stacked bar: Market Rent = Collected + the loss lines."""
-    segs = [
-        ("Collected", mm["collected"], "#2dd4bf"),
-        ("Price optimization loss", mm["price_loss"], "#fb7185"),
-        ("Vacancy — booked", mm["booked_loss"], "#a78bfa"),
-        ("Vacancy — vacant", mm["vacant_loss"], "#fbbf24"),
-    ]
-    fig = go.Figure()
-    for name, val, color in segs:
-        fig.add_bar(
-            y=["Market Rent"], x=[val], name=name, orientation="h",
-            marker_color=color,
-            hovertemplate=f"{name}: {symbol} %{{x:,.0f}}<extra></extra>")
-    fig.update_layout(barmode="stack")
-    fig.update_yaxes(showticklabels=False)
-    fig.update_xaxes(title=None, tickprefix=f"{symbol} ")
-    return style_fig(fig, 150)
+    """Waterfall: Market Rent steps down through each loss line to Collected."""
+    x = ["Market Rent", "Price opt. loss", "Vacancy (booked)",
+         "Vacancy (vacant)", "Collected"]
+    y = [mm["market_rent"], -mm["price_loss"], -mm["booked_loss"],
+         -mm["vacant_loss"], 0]
+    measure = ["absolute", "relative", "relative", "relative", "total"]
+    labels = [mm["market_rent"], mm["price_loss"], mm["booked_loss"],
+              mm["vacant_loss"], mm["collected"]]
+    fig = go.Figure(go.Waterfall(
+        orientation="v", x=x, y=y, measure=measure,
+        text=[money(symbol, v) for v in labels], textposition="outside",
+        textfont=dict(color="#cdd5e8"),
+        connector={"line": {"color": "rgba(255,255,255,0.18)"}},
+        decreasing={"marker": {"color": "#fb7185"}},
+        increasing={"marker": {"color": "#fbbf24"}},
+        totals={"marker": {"color": "#2dd4bf"}},
+        hovertemplate="%{x}: %{text}<extra></extra>",
+    ))
+    fig.update_yaxes(tickprefix=f"{symbol} ")
+    fig.update_layout(showlegend=False)
+    return style_fig(fig, 320)
 
 
 # ----------------------------------------------------------------- revenue bridge
