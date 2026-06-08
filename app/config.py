@@ -53,15 +53,18 @@ REGISTRY: dict = {
 # Prettier display names for a few building tab titles.
 DISPLAY_OVERRIDES = {"Int Plaza": "International Plaza"}
 
-# Per-(city, building) notes rendered as a callout in the building view.
-CITY_BUILDING_NOTES = {
-    ("Vancouver", "Richard & Pender"): (
-        "Apartments 507, 701 and 901 (11 vacant rooms at the bottom of the sheet) "
-        "appear to be under renovation. Manually-prepared figures exclude them, so "
-        "the team's market rent came out lower (~CA$20,075). This dashboard counts "
-        "all rooms, so its market rent and vacancy are higher. To revisit."
-    ),
+# Buildings that have been handed back / are no longer operated. Their lobbyboard
+# tabs still hold stale data, so we drop them at load time (per city, by building
+# display name). In Vancouver only International Plaza is still active.
+CITY_REMOVED_BUILDINGS = {
+    "Vancouver": {
+        "Richard & Pender", "Hub Place", "Broughton", "Hillcrest Manor",
+        "Lynn Gary Apt", "Pendrell", "Tantus Tower",
+    },
 }
+
+# Per-(city, building) notes rendered as a callout in the building view.
+CITY_BUILDING_NOTES: dict = {}
 
 
 def countries() -> list[str]:
@@ -90,3 +93,8 @@ def display_name(tab: str) -> str:
 
 def building_note(city: str, name: str) -> str | None:
     return CITY_BUILDING_NOTES.get((city, name))
+
+
+def removed_buildings(city: str) -> set:
+    """Buildings to drop from the dashboard (handed back); read-only, sheets untouched."""
+    return CITY_REMOVED_BUILDINGS.get(city, set())

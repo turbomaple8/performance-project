@@ -22,7 +22,9 @@ import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
-from config import WEEKS_PER_MONTH, cities, display_name, sheet_id
+from config import (
+    WEEKS_PER_MONTH, cities, display_name, removed_buildings, sheet_id,
+)
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -212,7 +214,11 @@ def load_city(country: str, city: str) -> pd.DataFrame:
         if not values:
             continue
         recs.extend(_records(values[1:], values[0], tab, city))
-    return pd.DataFrame(recs, columns=COLUMNS)
+    df = pd.DataFrame(recs, columns=COLUMNS)
+    dropped = removed_buildings(city)
+    if dropped:
+        df = df[~df["building"].isin(dropped)].reset_index(drop=True)
+    return df
 
 
 @st.cache_data(ttl=600, show_spinner=False)
