@@ -71,7 +71,9 @@ with st.sidebar:
     )
 
     city_opts = ["All cities"] + cfg.cities(country)
-    city_sel = st.selectbox("City", city_opts)
+    # Default to the first city (not "All cities") so a cold start loads one sheet
+    # instead of every city at once.
+    city_sel = st.selectbox("City", city_opts, index=1 if len(city_opts) > 1 else 0)
 
     include_closed = st.checkbox(
         "Include closed / empty buildings", value=False,

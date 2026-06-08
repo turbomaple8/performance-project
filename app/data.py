@@ -15,12 +15,14 @@ Conventions (confirmed with the user):
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 import gspread
 import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
+from gspread.exceptions import APIError
 
 from config import (
     WEEKS_PER_MONTH, cities, display_name, removed_buildings, sheet_id,
@@ -176,38 +178,51 @@ def _records(rows: list, header: list, tab: str, city: str) -> list[dict]:
     return recs
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def building_tabs(sheet_id_: str) -> list[str]:
-    """Auto-detect the lobbyboard building tabs in a sheet (by header row)."""
-    sh = _client().open_by_key(sheet_id_)
-    titles = [ws.title for ws in sh.worksheets()]
-    ranges = [f"{_q(t)}!A{HEADER_ROW}:N{HEADER_ROW}" for t in titles]
-    res = sh.values_batch_get(ranges)["valueRanges"]
-    out: list[str] = []
-    for title, vr in zip(titles, res):
-        if OLD_RE.search(title):
-            continue
-        values = vr.get("values") or [[]]
-        header = values[0] if values else []
-        labels = {str(c).strip().upper() for c in header}
-        if LOBBY_TOKENS <= labels:
-            out.append(title)
-    return out
+def _retry(fn, tries: int = 4):
+    """Call fn(), retrying transient Sheets API errors (429/5xx) with backoff."""
+    delay = 1.0
+    for attempt in range(tries):
+        try:
+            return fn()
+        except APIError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (429, 500, 502, 503) and attempt < tries - 1:
+                time.sleep(delay)
+                delay *= 2
+                continue
+            raise
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_city(country: str, city: str) -> pd.DataFrame:
-    """Load every building tab in a city into one room-level DataFrame."""
+    """Load every building tab in a city into one room-level DataFrame.
+
+    One open + two batched reads per city (with retry), to stay well under the
+    Sheets API rate limits when a whole country is loaded at once.
+    """
     sid = sheet_id(country, city)
     if not sid:
         return pd.DataFrame(columns=COLUMNS)
-    tabs = building_tabs(sid)
+
+    sh = _retry(lambda: _client().open_by_key(sid))
+    titles = [ws.title for ws in sh.worksheets() if not OLD_RE.search(ws.title)]
+    if not titles:
+        return pd.DataFrame(columns=COLUMNS)
+
+    # Detect building tabs from the header row, then fetch only those.
+    head = _retry(lambda: sh.values_batch_get(
+        [f"{_q(t)}!A{HEADER_ROW}:N{HEADER_ROW}" for t in titles]))["valueRanges"]
+    tabs = []
+    for title, vr in zip(titles, head):
+        header = (vr.get("values") or [[]])
+        labels = {str(c).strip().upper() for c in (header[0] if header else [])}
+        if LOBBY_TOKENS <= labels:
+            tabs.append(title)
     if not tabs:
         return pd.DataFrame(columns=COLUMNS)
 
-    sh = _client().open_by_key(sid)
-    ranges = [f"{_q(t)}!A{HEADER_ROW}:N2000" for t in tabs]
-    res = sh.values_batch_get(ranges)["valueRanges"]
+    res = _retry(lambda: sh.values_batch_get(
+        [f"{_q(t)}!A{HEADER_ROW}:N2000" for t in tabs]))["valueRanges"]
     recs: list[dict] = []
     for tab, vr in zip(tabs, res):
         values = vr.get("values") or []
