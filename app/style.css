@@ -1,0 +1,132 @@
+/* ---- Performance dashboard theme ---- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  --bg-0: #070b16;
+  --bg-1: #0d1424;
+  --panel: rgba(255, 255, 255, 0.035);
+  --panel-brd: rgba(255, 255, 255, 0.08);
+  --txt: #e8edf7;
+  --muted: #8b97b3;
+  --accent: #7c5cff;
+  --teal: #2dd4bf;
+  --amber: #fbbf24;
+  --rose: #fb7185;
+}
+
+html, body, [class*="css"], .stApp {
+  font-family: 'Inter', sans-serif;
+}
+
+.stApp {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(124, 92, 255, 0.18), transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, rgba(45, 212, 191, 0.12), transparent 55%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1));
+  color: var(--txt);
+}
+
+/* hide default chrome */
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1400px; }
+
+/* ---- Sidebar ---- */
+section[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, rgba(13, 20, 36, 0.95), rgba(7, 11, 22, 0.95));
+  border-right: 1px solid var(--panel-brd);
+}
+section[data-testid="stSidebar"] .stSelectbox label { color: var(--muted); font-weight: 600; font-size: 0.8rem; }
+
+.brand {
+  display: flex; align-items: center; gap: 0.65rem;
+  font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.25rem;
+  letter-spacing: -0.02em; margin-bottom: 0.2rem;
+}
+.brand .dot {
+  width: 30px; height: 30px; border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), var(--teal));
+  box-shadow: 0 6px 20px rgba(124, 92, 255, 0.45);
+}
+.brand-sub { color: var(--muted); font-size: 0.78rem; margin: 0 0 1.4rem 0.1rem; }
+
+/* ---- Hero ---- */
+.hero { margin-bottom: 1.6rem; }
+.breadcrumb {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  color: var(--muted); font-size: 0.82rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.55rem;
+}
+.breadcrumb .sep { opacity: 0.45; }
+.breadcrumb .here { color: var(--teal); }
+.hero h1 {
+  font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+  font-size: 2.5rem; line-height: 1.05; margin: 0; letter-spacing: -0.03em;
+}
+.hero .scope-pill {
+  display: inline-block; margin-left: 0.6rem; padding: 0.2rem 0.7rem;
+  font-size: 0.8rem; font-weight: 600; vertical-align: middle;
+  border-radius: 999px; background: rgba(124, 92, 255, 0.16);
+  color: #c7b8ff; border: 1px solid rgba(124, 92, 255, 0.35);
+}
+.hero p { color: var(--muted); margin: 0.5rem 0 0; font-size: 0.95rem; }
+
+/* ---- KPI cards ---- */
+.kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.9rem; margin: 0.4rem 0 1.6rem; }
+.kpi {
+  position: relative; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--panel-brd);
+  border-radius: 16px; padding: 1.05rem 1.1rem 1.1rem;
+  backdrop-filter: blur(8px); transition: transform .15s ease, border-color .15s ease;
+}
+.kpi:hover { transform: translateY(-3px); border-color: rgba(255,255,255,0.18); }
+.kpi .label { color: var(--muted); font-size: 0.74rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.kpi .value { font-family: 'Space Grotesk', sans-serif; font-size: 1.72rem; font-weight: 700; margin-top: 0.35rem; letter-spacing: -0.02em; }
+.kpi .sub { color: var(--muted); font-size: 0.78rem; margin-top: 0.28rem; }
+.kpi .bar { position: absolute; left: 0; top: 0; height: 3px; width: 100%; }
+.kpi.accent .bar { background: linear-gradient(90deg, var(--accent), #b39bff); }
+.kpi.teal .bar { background: linear-gradient(90deg, var(--teal), #7ff0e0); }
+.kpi.amber .bar { background: linear-gradient(90deg, var(--amber), #ffd874); }
+.kpi.rose .bar { background: linear-gradient(90deg, var(--rose), #ffa6b4); }
+.kpi.accent .value { color: #c7b8ff; }
+.kpi.teal .value { color: var(--teal); }
+.kpi.amber .value { color: var(--amber); }
+.kpi.rose .value { color: var(--rose); }
+
+/* ---- Section titles ---- */
+.section-title {
+  font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 1.05rem;
+  margin: 1.4rem 0 0.6rem; letter-spacing: -0.01em;
+}
+.section-title .muted { color: var(--muted); font-weight: 500; font-size: 0.85rem; }
+
+/* panel wrapper for charts */
+.panel {
+  background: var(--panel); border: 1px solid var(--panel-brd);
+  border-radius: 16px; padding: 0.4rem 0.6rem;
+}
+
+/* coming soon */
+.coming {
+  text-align: center; padding: 4rem 2rem; color: var(--muted);
+  background: var(--panel); border: 1px dashed var(--panel-brd); border-radius: 18px;
+}
+.coming h2 { color: var(--txt); font-family: 'Space Grotesk', sans-serif; margin-bottom: 0.4rem; }
+
+/* dataframe tweaks */
+[data-testid="stDataFrame"] { border-radius: 14px; overflow: hidden; border: 1px solid var(--panel-brd); }
+
+/* callout (per-building note) */
+.callout {
+  display: flex; gap: 0.7rem; align-items: flex-start;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-left: 3px solid var(--amber);
+  border-radius: 12px; padding: 0.8rem 1rem; margin: 0.2rem 0 1.2rem;
+  color: #e6dcc2; font-size: 0.86rem; line-height: 1.5;
+}
+.callout .ico { font-size: 1rem; line-height: 1.4; }
+.callout b { color: #fde9b8; }
+
+/* note line */
+.note { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; line-height: 1.5; }
+.note b { color: var(--txt); }

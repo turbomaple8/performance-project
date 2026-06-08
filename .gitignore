@@ -1,0 +1,10 @@
+config/service-account.json
+.streamlit/secrets.toml
+docs/
+runs/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.egg-info/
+.pytest_cache/
