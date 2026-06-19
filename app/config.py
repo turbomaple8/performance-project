@@ -25,6 +25,12 @@ WEEKS_PER_MONTH = 4.34524
 # Source index sheet (column B holds the per-city lobbyboard links).
 SALES_INDEX_SHEET = "12mvdf-KgHK38mfek4OCOLIdzLMQ2mtosEKO9je23ALo"
 
+# Combined multi-city "SPV Lobbyboard": one spreadsheet holding building tabs for
+# several markets at once (Seattle, Austin/Capitol, Ottawa/Riverflow, Halifax,
+# Toronto-SPV, Regina). Loading it whole would double-count, so cities that draw
+# from it list the SPECIFIC tabs they own (see the list-form registry entries).
+SPV_SHEET = "1sbPDNgluJ1CIeE6g00TUfZVnfyrJXWvskfjKppAwhlg"
+
 REGISTRY: dict = {
     "Canada": {
         "flag": "🇨🇦",
@@ -45,9 +51,15 @@ REGISTRY: dict = {
         "cities": {
             "New York": "1cUTL-wNsVN5jnhJ_F5M0NY57rD1seDqfvRWvJ7x_xgc",
             "Boston": "1jYgzWC5Stg5qj49METhJWeE-bqujcJ0_dBpT8z8r_vg",
-            "Austin": "1wRnp5cTQiu8DzOw2SB2J5UVsO9PWtPRPWSUBjjVIsBo",
+            "Austin": [
+                "1wRnp5cTQiu8DzOw2SB2J5UVsO9PWtPRPWSUBjjVIsBo",  # North Campus Hive
+                {"sheet": SPV_SHEET, "tabs": ["Capitol"]},
+            ],
             "Miami": "1vdIU8AkKOaQlqcCktnCiWCw6P9G6h49FofUG0LcRnck",
             "Chicago": "1UUwSuLvuB1urZPnOkAhdl9YYl04NUmqd_BL_opHVCCU",
+            "Seattle": [
+                {"sheet": SPV_SHEET, "tabs": ["Dover Apartments", "Emerson Apartments"]},
+            ],
         },
     },
     "United Kingdom": {
@@ -84,8 +96,34 @@ def cities(country: str) -> list[str]:
     return list(REGISTRY.get(country, {}).get("cities", {}).keys())
 
 
+def city_sources(country: str, city: str) -> list[tuple[str, list | None]]:
+    """Normalize a city's registry entry into [(sheet_id, tab_filter_or_None)].
+
+    Entry forms:
+      "sheet_id"                              -> all building tabs in that sheet
+      [ "sheet_id", {"sheet": id, "tabs": [...]}, ... ]
+                                              -> several sources; a dict source
+                                                 restricts to the named tabs
+                                                 (for the shared SPV sheet).
+    """
+    val = REGISTRY.get(country, {}).get("cities", {}).get(city)
+    if not val:
+        return []
+    if isinstance(val, str):
+        return [(val, None)]
+    out: list[tuple[str, list | None]] = []
+    for src in val:
+        if isinstance(src, str):
+            out.append((src, None))
+        else:
+            out.append((src["sheet"], src.get("tabs")))
+    return out
+
+
 def sheet_id(country: str, city: str) -> str | None:
-    return REGISTRY.get(country, {}).get("cities", {}).get(city)
+    """First sheet id for a city (back-compat; prefer city_sources)."""
+    srcs = city_sources(country, city)
+    return srcs[0][0] if srcs else None
 
 
 def currency(country: str) -> str:

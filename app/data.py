@@ -27,7 +27,7 @@ from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError
 
 from config import (
-    WEEKS_PER_MONTH, cities, display_name, removed_buildings, sheet_id,
+    WEEKS_PER_MONTH, cities, city_sources, display_name, removed_buildings,
 )
 
 SCOPES = [
@@ -239,22 +239,17 @@ def _retry(fn, tries: int = 4):
             raise
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def load_city(country: str, city: str) -> pd.DataFrame:
-    """Load every building tab in a city into one room-level DataFrame.
-
-    One open + two batched reads per city (with retry), to stay well under the
-    Sheets API rate limits when a whole country is loaded at once.
-    """
-    sid = sheet_id(country, city)
-    if not sid:
-        return pd.DataFrame(columns=COLUMNS)
-
+def _load_source(sid: str, tab_filter: list | None, city: str) -> list[dict]:
+    """Building-tab rows from one sheet. `tab_filter` (used for the shared SPV
+    sheet) restricts to the named tabs so other markets aren't pulled in."""
     sh = _retry(lambda: _client().open_by_key(sid))
     titles = [ws.title for ws in sh.worksheets()
               if not OLD_RE.search(ws.title) and not COPY_RE.search(ws.title)]
+    if tab_filter is not None:
+        wanted = set(tab_filter)
+        titles = [t for t in titles if t in wanted]
     if not titles:
-        return pd.DataFrame(columns=COLUMNS)
+        return []
 
     # Detect building tabs from the header row, then fetch only those.
     head = _retry(lambda: sh.values_batch_get(
@@ -266,7 +261,7 @@ def load_city(country: str, city: str) -> pd.DataFrame:
         if LOBBY_TOKENS <= labels:
             tabs.append(title)
     if not tabs:
-        return pd.DataFrame(columns=COLUMNS)
+        return []
 
     res = _retry(lambda: sh.values_batch_get(
         [f"{_q(t)}!A{HEADER_ROW}:N2000" for t in tabs]))["valueRanges"]
@@ -276,6 +271,24 @@ def load_city(country: str, city: str) -> pd.DataFrame:
         if not values:
             continue
         recs.extend(_records(values[1:], values[0], tab, city))
+    return recs
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_city(country: str, city: str) -> pd.DataFrame:
+    """Load every building tab for a city into one room-level DataFrame.
+
+    A city can draw from one sheet, or from several sources (e.g. its own sheet
+    plus specific tabs of the shared SPV Lobbyboard); see `config.city_sources`.
+    """
+    sources = city_sources(country, city)
+    if not sources:
+        return pd.DataFrame(columns=COLUMNS)
+
+    recs: list[dict] = []
+    for sid, tab_filter in sources:
+        recs.extend(_load_source(sid, tab_filter, city))
+
     df = pd.DataFrame(recs, columns=COLUMNS)
     dropped = removed_buildings(city)
     if dropped:
