@@ -48,6 +48,7 @@ FOUR_WEEKLY_MONTHLY_RATIO = 1.5
 # A tab is a building lobbyboard if its header row contains these labels.
 LOBBY_TOKENS = {"MARKET RENT", "ROOM TYPE"}
 OLD_RE = re.compile(r"\bOLD\b", re.IGNORECASE)  # skip stale "- OLD" tabs
+COPY_RE = re.compile(r"\bcopy of\b", re.IGNORECASE)  # skip duplicate "Copy of ..." backup tabs
 
 # header label (lower-case) -> normalized field name
 HEADER_FIELDS = {
@@ -250,7 +251,8 @@ def load_city(country: str, city: str) -> pd.DataFrame:
         return pd.DataFrame(columns=COLUMNS)
 
     sh = _retry(lambda: _client().open_by_key(sid))
-    titles = [ws.title for ws in sh.worksheets() if not OLD_RE.search(ws.title)]
+    titles = [ws.title for ws in sh.worksheets()
+              if not OLD_RE.search(ws.title) and not COPY_RE.search(ws.title)]
     if not titles:
         return pd.DataFrame(columns=COLUMNS)
 

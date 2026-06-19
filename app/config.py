@@ -6,9 +6,15 @@ auto-detected in data.py (no need to list them here).
 
 Not wired up yet (need action):
   - Toronto  : index link is a Drive *folder*, not a single sheet.
-  - DC       : sheet not shared with the service account (PermissionError).
-  - Regina   : index link is a combined multi-city "SPV Lobbyboard" whose
-               building tabs also appear under other cities -> would double-count.
+  - DC       : sheet (1Zow3myXuo4z-qyxzYq7A11PpsZB942W_otbm9z9MRHQ) not shared
+               with the service account (PermissionError) -> needs sharing.
+  - Seattle  : the index link points at the combined multi-city "SPV Lobbyboard"
+               (1sbPDNgluJ1...; Regina/Riverflow/etc.) -> would double-count;
+               needs a clean Seattle-only sheet.
+  - Regina   : same combined "SPV Lobbyboard" -> would double-count.
+
+Added 2026-06-19: Austin, Miami, Chicago (US) once confirmed shared + valid
+building tabs. "Copy of ..." backup tabs are skipped in data.py.
 """
 
 from __future__ import annotations
@@ -39,6 +45,9 @@ REGISTRY: dict = {
         "cities": {
             "New York": "1cUTL-wNsVN5jnhJ_F5M0NY57rD1seDqfvRWvJ7x_xgc",
             "Boston": "1jYgzWC5Stg5qj49METhJWeE-bqujcJ0_dBpT8z8r_vg",
+            "Austin": "1wRnp5cTQiu8DzOw2SB2J5UVsO9PWtPRPWSUBjjVIsBo",
+            "Miami": "1vdIU8AkKOaQlqcCktnCiWCw6P9G6h49FofUG0LcRnck",
+            "Chicago": "1UUwSuLvuB1urZPnOkAhdl9YYl04NUmqd_BL_opHVCCU",
         },
     },
     "United Kingdom": {
