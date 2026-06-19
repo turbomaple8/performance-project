@@ -14,6 +14,8 @@ Conventions (confirmed with the user):
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import time
 from pathlib import Path
@@ -64,18 +66,54 @@ COLUMNS = [
     "city", "building", "no", "apartment", "room_type",
     "market_rent_weekly", "market_rent_monthly",
     "amount_raw", "amount_monthly", "plan", "resident",
-    "availability", "occupied",
+    "availability", "status", "occupied",
 ]
+
+# Room classification is driven by the lobbyboard's own "Room Availability"
+# label, NOT by amount>0. The amount>0 heuristic silently overcounts occupancy
+# on stale / handed-back buildings, whose tabs still carry old Amounts (verified
+# against the team's booking-truth: amount>0 was off by ~20% portfolio-wide, the
+# label is off by <5%). The label set below matches the lobbyboard vocabulary
+# (occupied / pipeline / vacant / pre-booked / booked / facilities) and the
+# team app's taxonomy.
+BOOKED_LABELS = {"booked", "pre-booked", "prebooked", "pipeline"}  # committed, revenue pending
+NONRENTABLE_LABELS = {"facilities", "facility", "storage"}          # not part of rentable stock
+
+
+def classify(availability, amount) -> str:
+    """Map a room to occupied / booked / vacant / facilities from its label.
+
+    Falls back to the amount>0 heuristic ONLY when the label is blank or
+    unrecognized, so buildings with clean labels are classified by label (the
+    accurate signal) while odd rows still get a sensible default."""
+    lab = str(availability).strip().lower()
+    if lab in NONRENTABLE_LABELS:
+        return "facilities"
+    if lab == "occupied":
+        return "occupied"
+    if lab in BOOKED_LABELS:
+        return "booked"
+    if lab == "vacant":
+        return "vacant"
+    # blank / unknown label -> last-resort amount heuristic
+    return "occupied" if (amount is not None and amount > 0) else "vacant"
 
 
 def _credentials() -> Credentials:
-    """Prefer Streamlit secrets (cloud); fall back to the local key file (dev)."""
+    """Resolve service-account creds in priority order:
+    1. Streamlit secrets  (Streamlit Cloud)
+    2. GCP_SERVICE_ACCOUNT env var holding the full JSON  (Vercel / CI build)
+    3. local key file  (dev).
+    """
     try:
         sa = st.secrets.get("gcp_service_account")
     except Exception:
         sa = None
     if sa:
         return Credentials.from_service_account_info(dict(sa), scopes=SCOPES)
+    raw = os.environ.get("GCP_SERVICE_ACCOUNT")
+    if raw:
+        return Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
     return Credentials.from_service_account_file(str(SA_PATH), scopes=SCOPES)
 
 
@@ -144,8 +182,14 @@ def _records(rows: list, header: list, tab: str, city: str) -> list[dict]:
         is_four_weekly = plan.lower().startswith("four")
 
         mr_monthly = mr * WEEKS_PER_MONTH if mr is not None else 0.0
-        occupied = amt is not None and amt > 0
-        if not occupied:
+        availability = str(g(avail_i)).strip()
+        status = classify(availability, amt)
+        occupied = status == "occupied"
+        # amount_monthly is the on-board figure for any room that carries one,
+        # independent of the occupancy label (revenue is summed over occupied
+        # rooms in metrics()).
+        has_amount = amt is not None and amt > 0
+        if not has_amount:
             amount_monthly = 0.0
         elif not is_four_weekly:
             amount_monthly = amt  # monthly plan: already monthly
@@ -172,7 +216,8 @@ def _records(rows: list, header: list, tab: str, city: str) -> list[dict]:
             "amount_monthly": amount_monthly,
             "plan": plan or "—",
             "resident": str(g(res_i)).strip(),
-            "availability": str(g(avail_i)).strip(),
+            "availability": availability,
+            "status": status,
             "occupied": occupied,
         })
     return recs
@@ -253,35 +298,40 @@ def active_buildings(df: pd.DataFrame) -> set:
     return set(df.loc[df["occupied"], "building"].unique())
 
 
-# Non-occupied rooms whose availability label means "committed, revenue pending"
-# (vs truly empty). Matches the original perf sheet's "Vacant room loss (booked)"
-# vs "(vacant)" split. "PIpeline" is the sheet's typo for Pipeline.
-BOOKED_LABELS = {"booked", "pre-booked", "prebooked", "pipeline"}
+def _status(df: pd.DataFrame) -> pd.Series:
+    """Row status, tolerant of older frames that predate the `status` column."""
+    if "status" in df:
+        return df["status"]
+    return df["availability"].apply(lambda a: classify(a, 1))
 
 
 def metrics(df: pd.DataFrame) -> dict:
     """Headline KPIs for any room-level DataFrame (building/city/country).
 
+    Rooms are classified by their lobbyboard label (see `classify`):
+        occupied / booked (committed) / vacant / facilities (non-rentable).
     Loss decomposition mirrors the original performance sheet:
         market_rent = collected + price_loss + vacancy_loss
         vacancy_loss = booked_loss + vacant_loss
+    Facilities rooms are kept in the inventory count but carry no rentable market
+    (so they neither earn nor show as a loss). Occupancy % uses total rooms.
     """
     if df is None or df.empty:
         return {
-            "rooms": 0, "occupied": 0, "vacant": 0, "booked": 0,
+            "rooms": 0, "occupied": 0, "vacant": 0, "booked": 0, "facilities": 0,
             "market_rent": 0.0, "collected": 0.0, "occupied_market": 0.0,
             "price_loss": 0.0, "vacancy_loss": 0.0,
             "vacant_loss": 0.0, "booked_loss": 0.0,
             "occupancy": 0.0, "capture": 0.0,
         }
-    occ = df[df["occupied"]]
-    non = df[~df["occupied"]]
-    booked_mask = non["availability"].str.strip().str.lower().isin(BOOKED_LABELS)
-    booked = non[booked_mask]
-    vacant = non[~booked_mask]
+    status = _status(df)
+    occ = df[status == "occupied"]
+    booked = df[status == "booked"]
+    vacant = df[status == "vacant"]
+    rentable = df[status != "facilities"]
 
     rooms = len(df)
-    market = float(df["market_rent_monthly"].sum())
+    market = float(rentable["market_rent_monthly"].sum())
     collected = float(occ["amount_monthly"].sum())
     occupied_market = float(occ["market_rent_monthly"].sum())
     booked_loss = float(booked["market_rent_monthly"].sum())
@@ -291,6 +341,7 @@ def metrics(df: pd.DataFrame) -> dict:
         "occupied": int(len(occ)),
         "vacant": int(len(vacant)),
         "booked": int(len(booked)),
+        "facilities": int((status == "facilities").sum()),
         "market_rent": market,
         "collected": collected,
         "occupied_market": occupied_market,
