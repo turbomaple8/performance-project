@@ -4,17 +4,17 @@ City -> sheet links come from the "Sales - 2.0" tab (column B) of the Harrington
 Housing Business Report index sheet. Building tabs inside each sheet are
 auto-detected in data.py (no need to list them here).
 
-Not wired up yet (need action):
-  - Toronto  : index link is a Drive *folder*, not a single sheet.
-  - DC       : sheet (1Zow3myXuo4z-qyxzYq7A11PpsZB942W_otbm9z9MRHQ) not shared
-               with the service account (PermissionError) -> needs sharing.
-  - Seattle  : the index link points at the combined multi-city "SPV Lobbyboard"
-               (1sbPDNgluJ1...; Regina/Riverflow/etc.) -> would double-count;
-               needs a clean Seattle-only sheet.
-  - Regina   : same combined "SPV Lobbyboard" -> would double-count.
+Toronto's index link is a Drive *folder* with Zone 1/2/3 Lobbyboard sheets (plus
+dated backup copies, ignored); we list the 3 zone sheet ids directly. The shared
+"SPV Lobbyboard" (SPV_SHEET) holds building tabs for several markets at once, so
+cities that own tabs there list them via the {"sheet", "tabs"} source form
+(Seattle, Austin/Capitol, Toronto/Assinniboine.., Ottawa/Riverflow, Halifax/..).
 
-Added 2026-06-19: Austin, Miami, Chicago (US) once confirmed shared + valid
-building tabs. "Copy of ..." backup tabs are skipped in data.py.
+Still not wired (need action):
+  - DC     : sheet (1Zow3myXuo4z-qyxzYq7A11PpsZB942W_otbm9z9MRHQ) not shared with
+             the service account (PermissionError) -> needs sharing.
+  - Regina : "Regina (Robinson)" tab in SPV_SHEET, not in the edge app
+             (likely closed); add a tab source if it should appear.
 """
 
 from __future__ import annotations
@@ -40,8 +40,20 @@ REGISTRY: dict = {
             "Calgary": "1_JY5hGmWedviemVWMF3rg8ifplUarEP34p7o8xPpPy4",
             "Edmonton": "1-EKowAXNbTzC-iut3zehvXQfItM_ZRQxWp8KQe7Dt_E",
             "Montreal": "18Trtl7TcTdPV9XLkeuYR4O9oAUGvJZE4vX6ZZ3daMo0",
-            "Ottawa": "1VwnmC_I44dNPDkmgzwWbDAQk7QBuflIWgO5e0l0VGao",
-            "Halifax": "1gBiBiL71bjx9ZU-dCjZ76PEKxqL73iVrOdlueA9b5sg",
+            "Toronto": [
+                "1wxiBIhAOygjxpBF6mDsmMasmWgp5A5HSf2-S69w6-NE",  # Zone 1 Lobbyboard
+                "1TkH75Y_gnxQDusThETRlIzuUl5Ff2A71uSfuX_EMVQc",  # Zone 2 Lobbyboard
+                "1ejXrEPgQfpImE-IKh65jnDyndVRA6IbJ8solWAmvIXc",  # Zone 3 Lobbyboard
+                {"sheet": SPV_SHEET, "tabs": ["Assinniboine", "Boake", "Morningside", "Charles"]},
+            ],
+            "Ottawa": [
+                "1VwnmC_I44dNPDkmgzwWbDAQk7QBuflIWgO5e0l0VGao",
+                {"sheet": SPV_SHEET, "tabs": ["Riverflow"]},
+            ],
+            "Halifax": [
+                "1gBiBiL71bjx9ZU-dCjZ76PEKxqL73iVrOdlueA9b5sg",
+                {"sheet": SPV_SHEET, "tabs": ["7 Jackson", "29 Primrose", "20 Brule", "4 Crystal"]},
+            ],
             "Victoria": "1ZFaPVYx-VotaQoz3O0BlAnrls6egsZPWnfEppKYTyIM",
         },
     },
