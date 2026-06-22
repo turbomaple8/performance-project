@@ -4,11 +4,17 @@ City -> sheet links come from the "Sales - 2.0" tab (column B) of the Harrington
 Housing Business Report index sheet. Building tabs inside each sheet are
 auto-detected in data.py (no need to list them here).
 
-Not wired up yet (need action):
-  - Toronto  : index link is a Drive *folder*, not a single sheet.
-  - DC       : sheet not shared with the service account (PermissionError).
-  - Regina   : index link is a combined multi-city "SPV Lobbyboard" whose
-               building tabs also appear under other cities -> would double-count.
+Toronto's index link is a Drive *folder* with Zone 1/2/3 Lobbyboard sheets (plus
+dated backup copies, ignored); we list the 3 zone sheet ids directly. The shared
+"SPV Lobbyboard" (SPV_SHEET) holds building tabs for several markets at once, so
+cities that own tabs there list them via the {"sheet", "tabs"} source form
+(Seattle, Austin/Capitol, Toronto/Assinniboine.., Ottawa/Riverflow, Halifax/..).
+
+Still not wired (need action):
+  - DC     : sheet (1Zow3myXuo4z-qyxzYq7A11PpsZB942W_otbm9z9MRHQ) not shared with
+             the service account (PermissionError) -> needs sharing.
+  - Regina : "Regina (Robinson)" tab in SPV_SHEET, not in the edge app
+             (likely closed); add a tab source if it should appear.
 """
 
 from __future__ import annotations
@@ -19,6 +25,12 @@ WEEKS_PER_MONTH = 4.34524
 # Source index sheet (column B holds the per-city lobbyboard links).
 SALES_INDEX_SHEET = "12mvdf-KgHK38mfek4OCOLIdzLMQ2mtosEKO9je23ALo"
 
+# Combined multi-city "SPV Lobbyboard": one spreadsheet holding building tabs for
+# several markets at once (Seattle, Austin/Capitol, Ottawa/Riverflow, Halifax,
+# Toronto-SPV, Regina). Loading it whole would double-count, so cities that draw
+# from it list the SPECIFIC tabs they own (see the list-form registry entries).
+SPV_SHEET = "1sbPDNgluJ1CIeE6g00TUfZVnfyrJXWvskfjKppAwhlg"
+
 REGISTRY: dict = {
     "Canada": {
         "flag": "🇨🇦",
@@ -28,8 +40,20 @@ REGISTRY: dict = {
             "Calgary": "1_JY5hGmWedviemVWMF3rg8ifplUarEP34p7o8xPpPy4",
             "Edmonton": "1-EKowAXNbTzC-iut3zehvXQfItM_ZRQxWp8KQe7Dt_E",
             "Montreal": "18Trtl7TcTdPV9XLkeuYR4O9oAUGvJZE4vX6ZZ3daMo0",
-            "Ottawa": "1VwnmC_I44dNPDkmgzwWbDAQk7QBuflIWgO5e0l0VGao",
-            "Halifax": "1gBiBiL71bjx9ZU-dCjZ76PEKxqL73iVrOdlueA9b5sg",
+            "Toronto": [
+                "1wxiBIhAOygjxpBF6mDsmMasmWgp5A5HSf2-S69w6-NE",  # Zone 1 Lobbyboard
+                "1TkH75Y_gnxQDusThETRlIzuUl5Ff2A71uSfuX_EMVQc",  # Zone 2 Lobbyboard
+                "1ejXrEPgQfpImE-IKh65jnDyndVRA6IbJ8solWAmvIXc",  # Zone 3 Lobbyboard
+                {"sheet": SPV_SHEET, "tabs": ["Assinniboine", "Boake", "Morningside", "Charles"]},
+            ],
+            "Ottawa": [
+                "1VwnmC_I44dNPDkmgzwWbDAQk7QBuflIWgO5e0l0VGao",
+                {"sheet": SPV_SHEET, "tabs": ["Riverflow"]},
+            ],
+            "Halifax": [
+                "1gBiBiL71bjx9ZU-dCjZ76PEKxqL73iVrOdlueA9b5sg",
+                {"sheet": SPV_SHEET, "tabs": ["7 Jackson", "29 Primrose", "20 Brule", "4 Crystal"]},
+            ],
             "Victoria": "1ZFaPVYx-VotaQoz3O0BlAnrls6egsZPWnfEppKYTyIM",
         },
     },
@@ -39,6 +63,15 @@ REGISTRY: dict = {
         "cities": {
             "New York": "1cUTL-wNsVN5jnhJ_F5M0NY57rD1seDqfvRWvJ7x_xgc",
             "Boston": "1jYgzWC5Stg5qj49METhJWeE-bqujcJ0_dBpT8z8r_vg",
+            "Austin": [
+                "1wRnp5cTQiu8DzOw2SB2J5UVsO9PWtPRPWSUBjjVIsBo",  # North Campus Hive
+                {"sheet": SPV_SHEET, "tabs": ["Capitol"]},
+            ],
+            "Miami": "1vdIU8AkKOaQlqcCktnCiWCw6P9G6h49FofUG0LcRnck",
+            "Chicago": "1UUwSuLvuB1urZPnOkAhdl9YYl04NUmqd_BL_opHVCCU",
+            "Seattle": [
+                {"sheet": SPV_SHEET, "tabs": ["Dover Apartments", "Emerson Apartments"]},
+            ],
         },
     },
     "United Kingdom": {
@@ -75,8 +108,34 @@ def cities(country: str) -> list[str]:
     return list(REGISTRY.get(country, {}).get("cities", {}).keys())
 
 
+def city_sources(country: str, city: str) -> list[tuple[str, list | None]]:
+    """Normalize a city's registry entry into [(sheet_id, tab_filter_or_None)].
+
+    Entry forms:
+      "sheet_id"                              -> all building tabs in that sheet
+      [ "sheet_id", {"sheet": id, "tabs": [...]}, ... ]
+                                              -> several sources; a dict source
+                                                 restricts to the named tabs
+                                                 (for the shared SPV sheet).
+    """
+    val = REGISTRY.get(country, {}).get("cities", {}).get(city)
+    if not val:
+        return []
+    if isinstance(val, str):
+        return [(val, None)]
+    out: list[tuple[str, list | None]] = []
+    for src in val:
+        if isinstance(src, str):
+            out.append((src, None))
+        else:
+            out.append((src["sheet"], src.get("tabs")))
+    return out
+
+
 def sheet_id(country: str, city: str) -> str | None:
-    return REGISTRY.get(country, {}).get("cities", {}).get(city)
+    """First sheet id for a city (back-compat; prefer city_sources)."""
+    srcs = city_sources(country, city)
+    return srcs[0][0] if srcs else None
 
 
 def currency(country: str) -> str:

@@ -16,6 +16,7 @@ import streamlit as st
 
 import config as cfg
 import data
+import edge_api
 
 st.set_page_config(
     page_title="Performance Dashboard",
@@ -94,8 +95,9 @@ with st.sidebar:
         st.rerun()
     st.markdown(
         "<div class='note' style='margin-top:1.2rem'>Monthly figures. Weekly "
-        "rates converted at <b>×4.34524</b>. A room counts as occupied when its "
-        "<b>Amount &gt; 0</b>.</div>",
+        "rates converted at <b>×4.34524</b>. Rooms are classified by their "
+        "Lobby Board <b>availability label</b> (occupied / booked / vacant / "
+        "facilities), not by amount.</div>",
         unsafe_allow_html=True,
     )
 
@@ -214,6 +216,121 @@ def revenue_bridge(mm, symbol):
     return style_fig(fig, 320)
 
 
+def _visible_slugs(scope_df):
+    """Map the buildings currently on screen to edge building_id slugs.
+
+    Returns (allowed_slugs, unmatched_names, cities). Keeps the arrears section
+    consistent with exactly what the dashboard is showing (e.g. Vancouver shows
+    only International Plaza, so only its arrears count)."""
+    slugs, unmatched = set(), []
+    pairs = scope_df[["city", "building"]].drop_duplicates()
+    for _, r in pairs.iterrows():
+        bid = edge_api.building_id_for(r["city"], r["building"])
+        if bid:
+            slugs.add(bid)
+        else:
+            unmatched.append(r["building"])
+    return slugs, unmatched, sorted(scope_df["city"].unique())
+
+
+def _arrears_agg(tdf):
+    s = lambda c: float(tdf[c].fillna(0).sum()) if c in tdf else 0.0
+    chronic = int((tdf["max_overdue_days"] >= 60).sum()) if "max_overdue_days" in tdf else 0
+    return {"count": len(tdf), "total": s("total_owed_cad"),
+            "b030": s("owed_0_30"), "b3160": s("owed_31_60"),
+            "b60": s("owed_60_plus"), "chronic": chronic}
+
+
+def render_arrears(scope_df):
+    """Rent arrears for the current selection, pulled live from the edge app.
+
+    Source: booking rent schedule vs payments received. A schedule line is in
+    arrears when its due date is past and remaining_amount > 0; lines are aged
+    into 0-30 / 31-60 / 60+ buckets. Totals are normalized to CAD by the API."""
+    st.markdown(
+        '<div class="section-title">Rent Arrears '
+        '<span class="muted">· live from the team Lobbyboard · overdue rent, '
+        'aged by due date · CAD-normalized</span></div>',
+        unsafe_allow_html=True)
+
+    if not edge_api.configured():
+        st.markdown(
+            "<div class='note'>Arrears source not connected. Add a Firebase "
+            "<b>edge_refresh_token</b> to Streamlit secrets (or "
+            "<code>runs/hh-edge/refresh_token.txt</code> locally) to enable.</div>",
+            unsafe_allow_html=True)
+        return
+
+    slugs, unmatched, cities = _visible_slugs(scope_df)
+    try:
+        a = edge_api.arrears(cities=cities)
+    except edge_api.EdgeAuthError as ex:
+        st.markdown(f"<div class='note'>Arrears unavailable · {ex}</div>",
+                    unsafe_allow_html=True)
+        return
+    except Exception as ex:  # network / API hiccup - never crash the dashboard
+        st.markdown(f"<div class='note'>Arrears could not load · {ex}</div>",
+                    unsafe_allow_html=True)
+        return
+
+    tdf = a["tenants"]
+    if slugs and not tdf.empty and "building_id" in tdf:
+        tdf = tdf[tdf["building_id"].isin(slugs)].reset_index(drop=True)
+    agg = _arrears_agg(tdf)
+
+    cards = [
+        ("rose", "Total Owed", money("CA$", agg["total"]), "overdue, CAD"),
+        ("amber", "Tenants in Arrears", f"{agg['count']:,}", "with overdue rent"),
+        ("rose", "60+ Days", money("CA$", agg["b60"]), f"{agg['chronic']} chronic tenants"),
+        ("teal", "0-30 Days", money("CA$", agg["b030"]), "most recent"),
+    ]
+    html = "".join(
+        f'<div class="kpi {c}"><div class="bar"></div>'
+        f'<div class="label">{label}</div><div class="value">{val}</div>'
+        f'<div class="sub">{sub}</div></div>'
+        for c, label, val, sub in cards)
+    st.markdown(f'<div class="kpi-grid">{html}</div>', unsafe_allow_html=True)
+
+    if unmatched:
+        st.markdown(
+            f"<div class='note'>Note · no edge match for: "
+            f"<b>{', '.join(unmatched)}</b> — their arrears are not included.</div>",
+            unsafe_allow_html=True)
+
+    if tdf.empty:
+        st.markdown("<div class='note'>No overdue rent for this selection. ✅</div>",
+                    unsafe_allow_html=True)
+        return
+
+    left, right = st.columns([1, 1.6])
+    with left:
+        fig = go.Figure(go.Bar(
+            x=["0-30", "31-60", "60+"],
+            y=[agg["b030"], agg["b3160"], agg["b60"]],
+            marker_color=["#2dd4bf", "#fbbf24", "#fb7185"],
+            text=[money("CA$", v) for v in (agg["b030"], agg["b3160"], agg["b60"])],
+            textposition="outside", hovertemplate="%{x} days: %{y:,.0f}<extra></extra>"))
+        fig.update_yaxes(tickprefix="CA$ ")
+        fig.update_layout(showlegend=False)
+        st.plotly_chart(style_fig(fig, 300), width="stretch",
+                        config={"displayModeBar": False})
+    with right:
+        cols = [c for c in ["tenant_name", "building_id", "total_owed_cad",
+                            "max_overdue_days", "overdue_lines", "oldest_due",
+                            "collection_status"] if c in tdf]
+        top = tdf.sort_values("total_owed_cad", ascending=False)[cols].head(15)
+        st.dataframe(
+            top, width="stretch", hide_index=True, height=300,
+            column_config={
+                "tenant_name": "Tenant", "building_id": "Building",
+                "total_owed_cad": st.column_config.NumberColumn("Owed", format="CA$ %.0f"),
+                "max_overdue_days": st.column_config.NumberColumn("Max Days", format="%d"),
+                "overdue_lines": st.column_config.NumberColumn("Lines", format="%d"),
+                "oldest_due": "Oldest Due",
+                "collection_status": "Status",
+            })
+
+
 # ----------------------------------------------------------------- revenue bridge
 st.markdown(
     '<div class="section-title">Revenue bridge '
@@ -221,6 +338,10 @@ st.markdown(
     unsafe_allow_html=True)
 st.plotly_chart(revenue_bridge(m, sym), width="stretch",
                 config={"displayModeBar": False})
+
+
+# ----------------------------------------------------------------- rent arrears
+render_arrears(df)
 
 
 # ----------------------------------------------------------------- charts
@@ -357,8 +478,10 @@ else:  # building scope
         })
 
 st.markdown(
-    "<div class='note'>Source: Vancouver Lobby Board (live). "
+    "<div class='note'>Source: Lobby Board (live). "
     "Market Rent is a weekly price converted to monthly (×4.34524). "
     "Four-weekly amounts are converted to monthly the same way; monthly amounts "
-    "are used as-is. Occupied = Amount &gt; 0.</div>",
+    "are used as-is. Occupancy is read from each room's availability label "
+    "(occupied / booked / vacant / facilities), so stale Amounts on handed-back "
+    "buildings no longer count as occupied.</div>",
     unsafe_allow_html=True)

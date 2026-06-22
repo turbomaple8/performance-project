@@ -8,3 +8,9 @@ __pycache__/
 .DS_Store
 *.egg-info/
 .pytest_cache/
+
+# web build + generated data (data.json holds tenant PII -> never commit)
+web/node_modules/
+web/dist/
+web/public/data.json
+.vercel

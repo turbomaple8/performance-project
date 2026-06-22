@@ -1,0 +1,21 @@
+# Vercel does NOT use .gitignore for uploads, so exclude secrets + PII + cruft
+# explicitly. Only web/ (source + prebuilt public/data.json) and vercel.json are
+# needed for the static build.
+.git/
+.venv/
+runs/
+docs/
+config/
+.streamlit/
+app/
+extractors/
+perf/
+scripts/
+*.py
+requirements.txt
+pyproject.toml
+web/node_modules/
+web/dist/
+**/__pycache__/
+*.pyc
+.DS_Store
